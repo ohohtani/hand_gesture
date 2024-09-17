@@ -1,12 +1,12 @@
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
-from torchvision import transforms
-from torch.utils.data import DataLoader
-import torchvision.models.video as models
-from tqdm import tqdm
-import cv2
-import os
+from torchvision import transforms              # 데이터 전처리를 위한 다양한 변환 제공
+from torch.utils.data import DataLoader         # 데이터를 배치 단위로 로드하기 위해
+import torchvision.models.video as models       # 사전 학습된 비디오 모델 제공
+from tqdm import tqdm                           
+import cv2                                      # 비디오를 프레임 단위로 처리하기 위해
+import os                                       
 from sklearn.model_selection import train_test_split
 
 # Step 1: 데이터셋 로드 및 처리
@@ -18,55 +18,56 @@ class VideoDataset(Dataset):
         self.csv_data = csv_data
         self.transform = transform
         self.base_path = base_path
-        self.resize_transform = transforms.Resize((112, 112))
+        self.resize_transform = transforms.Resize((112, 112))   # 비디오 프레임 크기 조정 (이거 안하니까 112 x 160 이렇게 나오던데 원인 파악 필요)
 
     def __len__(self):
         return len(self.csv_data)
 
     def __getitem__(self, idx):
-        relative_path = self.csv_data.iloc[idx]['path']
-        video_path = os.path.join(self.base_path, relative_path.lstrip('./'))  # 상대 경로를 절대 경로로 변환
+        relative_path = self.csv_data.iloc[idx]['path']         # csv 데이터의 'path'열에서 데이터를 가져옴
+        video_path = os.path.join(self.base_path, relative_path.lstrip('./'))  # 베이스 경로 + path에 있는 경로 합쳐서 절대 경로 완성
 
         # 비디오 로드
         video = self.load_video(video_path)
 
         if 'label' in self.csv_data.columns:
-            label = int(self.csv_data.iloc[idx]['label'])
+            label = int(self.csv_data.iloc[idx]['label'])   # label 열이 존재하는 경우 정수형으로 반환
             return video, label
         else:
-            return video  # 테스트 데이터의 경우 라벨 없음
+            return video                                    # 테스트 데이터의 경우 라벨 없음
 
-    def load_video(self, path, max_frames=16):
+    def load_video(self, path, max_frames=16):              # 프레임 수를 일관되게 유지하기 위함인데, 30~60 고려 가능.
         cap = cv2.VideoCapture(path)
         frames = []
         frame_count = 0
 
         if not cap.isOpened():
-            print(f"Error: Cannot open video file {path}")
+            print(f"Error: Cannot open video file {path}") 
             return torch.empty(0)
 
         while True:
             ret, frame = cap.read()
-            if not ret or frame_count >= max_frames:
+            if not ret or frame_count >= max_frames:        # 비디오 마지막 부분 or 최대 프레임 도달
                 break
 
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_rgb_resized = self.resize_transform(transforms.ToPILImage()(frame_rgb))
-            frame_tensor = transforms.ToTensor()(frame_rgb_resized).float()
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # BGR(Opencv 기본값) -> RGB
+            frame_rgb_resized = self.resize_transform(transforms.ToPILImage()(frame_rgb)) # RGB로 변환된 이미지를 PIL 형식으로 변환(Resize 사용을 위해 필수)
+                                                                                          # 위에 설정되어 있는 (112, 112)로 크기 조정 (self.resize)
+            frame_tensor = transforms.ToTensor()(frame_rgb_resized).float()               # 크기 조정한 이미지를 텐서형태로 변환
 
-            frames.append(frame_tensor)
-            frame_count += 1
+            frames.append(frame_tensor)       # 텐서형태로 변환된 값을 frames 리스트에 추가하고
+            frame_count += 1                  # 프레임의 개수를 1 늘림 (현재까지 처리된)
 
-        cap.release()
+        cap.release()                         # 비디오 캡쳐 객체 해제
 
-        if len(frames) == 0:
+        if len(frames) == 0:                  # 비디오 손상 or 경로 미스의 경우 빈 텐서 반환
             print(f"Warning: No frames found in video {path}")
             return torch.empty(0)
 
-        while len(frames) < max_frames:
-            frames.append(frames[-1].clone())
+        while len(frames) < max_frames:       # 만약 max_frames 수에 도달하지 못한 경우
+            frames.append(frames[-1].clone()) # 마지막 프레임을 복제해서 크기를 맞춤
 
-        video_tensor = torch.stack(frames)[:max_frames]
+        video_tensor = torch.stack(frames)[:max_frames]   
         video_tensor = video_tensor.permute(1, 0, 2, 3)
 
         return video_tensor
